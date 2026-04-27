@@ -1,0 +1,45 @@
+services:
+  api1:
+    build:
+      context: .
+      dockerfile: ./cmd/api/Dockerfile
+    container_name: api1
+    environment:
+      - PORT=8001
+      - API_ID=1
+    networks:
+      - backend
+
+  api2:
+    build:
+      context: .
+      dockerfile: ./cmd/api/Dockerfile
+    container_name: api2
+    environment:
+      - PORT=8002
+      - API_ID=2
+    networks:
+      - backend
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: nginx-balancer
+    volumes:
+      - type: bind
+        source: ./nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+    ports:
+      - 9999:9999
+    networks:
+      - backend
+    depends_on:
+      - api2
+
+
+networks:
+  backend:
+    driver: bridge
+
+
+    
