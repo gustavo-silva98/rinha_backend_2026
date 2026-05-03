@@ -6,10 +6,10 @@ COPY ../go.mod ./
 
 RUN go mod download
 
-COPY ./cmd/api/*.go ./ 
+COPY ./cmd/ ./cmd/
+COPY ./internal/ ./internal/
+COPY ./resources/ ./resources/
 
-RUN ls
-
-RUN GOOS=linux go build -o api .
+RUN GOOS=linux go build -o api ./cmd/api/
 
 CMD [ "./api" ]

@@ -9,6 +9,11 @@ services:
       - API_ID=1
     networks:
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: 0.30
+          memory: "50MB"
 
   api2:
     build:
@@ -20,7 +25,11 @@ services:
       - API_ID=2
     networks:
       - backend
-
+    deploy:
+      resources:
+        limits:
+          cpus: 0.30
+          memory: "50MB"
   nginx:
     image: nginx:stable-alpine
     container_name: nginx-balancer
@@ -35,6 +44,11 @@ services:
       - backend
     depends_on:
       - api2
+    deploy:
+      resources:
+        limits:
+          cpus: 0.30
+          memory: "100MB"
 
 
 networks:
