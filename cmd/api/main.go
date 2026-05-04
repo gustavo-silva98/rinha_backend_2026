@@ -7,6 +7,7 @@ import (
 	"os"
 	"rinha2026/internal/model"
 	"rinha2026/internal/preprocess"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 // var ctx = context.Background()
 
+var ready bool
 var payloadPool = sync.Pool{
 	New: func() any {
 		return &model.Payload{}
@@ -50,7 +52,9 @@ func (api *Backend) ReadyEndpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	if ready {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +70,7 @@ func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
 	defer responsePool.Put(responsePtr)
 	*responsePtr = model.Response{}
 
-	err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&payloadPtr)
+	err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(payloadPtr)
 	if err != nil {
 		log.Fatalf("Erro ao ler payload: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -104,20 +108,72 @@ func deParaWeekday(weekday time.Time) int {
 	val := mapWeek[int(weekday.Weekday())]
 	return val
 }
+func warmupSonic() error {
+	const warmupJSON = `{
+    "id": "tx-3943816664",
+    "transaction": {
+      "amount": 6384.53,
+      "installments": 8,
+      "requested_at": "2026-03-10T05:22:29Z"
+    },
+    "customer": {
+      "avg_amount": 108.4,
+      "tx_count_24h": 20,
+      "known_merchants": [
+        "MERC-010",
+        "MERC-005",
+        "MERC-001",
+        "MERC-015"
+      ]
+    },
+    "merchant": {
+      "id": "MERC-074",
+      "mcc": "7802",
+      "avg_amount": 50.11
+    },
+    "terminal": {
+      "is_online": true,
+      "card_present": false,
+      "km_from_home": 271.4091990309
+    },
+    "last_transaction": {
+      "timestamp": "2026-03-10T05:21:29Z",
+      "km_from_current": 550.307568803
+    }
+  }`
+
+	payloadPtr := payloadPool.Get().(*model.Payload)
+	defer payloadPool.Put(payloadPtr)
+	*payloadPtr = model.Payload{}
+
+	responsePtr := responsePool.Get().(*model.Response)
+	defer responsePool.Put(responsePtr)
+	*responsePtr = model.Response{}
+	for i := 1; i < 10; i++ {
+
+		err := sonic.Unmarshal([]byte(warmupJSON), payloadPtr)
+		if err != nil {
+			return err
+		}
+		_, err = sonic.Marshal(responsePtr)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
-	requestedAt, _ := time.Parse(time.RFC3339, payload.Transaction.RequestedAt.String())
-	timestampLastTrans, _ := time.Parse(time.RFC3339, payload.LastTransaction.Timestamp.String())
 	vetor.Dim0 = int8(limitar(payload.Transaction.Amount/float64(api.NormConst.MaxAmount)) * 127)
 	vetor.Dim1 = int8(limitar(float64(payload.Transaction.Installments)/float64(api.NormConst.MaxInstallments)) * 127)
 	vetor.Dim2 = int8(limitar((payload.Transaction.Amount/payload.Customer.AvgAmount)/float64(api.NormConst.AmountVsAvgRatio)) * 127)
-	vetor.Dim3 = int8(requestedAt.Hour() / 23)
-	vetor.Dim4 = int8(deParaWeekday(requestedAt) / 6)
-	if timestampLastTrans.Year() < 2 {
+	vetor.Dim3 = int8(payload.Transaction.RequestedAt.Hour() / 23)
+	vetor.Dim4 = int8(deParaWeekday(payload.Transaction.RequestedAt) / 6)
+	if payload.LastTransaction.Timestamp.Year() < 2 {
 		vetor.Dim5 = int8(-1)
 		vetor.Dim6 = int8(-1)
 	} else {
-		vetor.Dim5 = int8(limitar(float64(timestampLastTrans.Minute())/float64(api.NormConst.MaxMinutes)) * 127)
+		vetor.Dim5 = int8(limitar(float64(payload.LastTransaction.Timestamp.Minute())/float64(api.NormConst.MaxMinutes)) * 127)
 		vetor.Dim6 = int8(limitar(payload.LastTransaction.KmFromCurrent / float64(api.NormConst.MaxKM)))
 	}
 	vetor.Dim7 = int8(limitar(payload.Terminal.KmFromHome / float64(api.NormConst.MaxKM)))
@@ -151,6 +207,7 @@ func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
 
 func main() {
 	// Carregando variaveis de normalização e MCC
+	runtime.GOMAXPROCS(1)
 	normConst, err := preprocess.LoadNormalization()
 	if err != nil {
 		log.Fatalf("erro ao carregar Constantes de Normalização: %v", err)
@@ -161,6 +218,11 @@ func main() {
 		log.Fatalf("erro ao carregar MCC: %v", err)
 		return
 	}
+	err = warmupSonic()
+	if err != nil {
+		log.Fatalf("erro ao WarmUp Sonic Json: %v", err)
+		return
+	}
 
 	port := os.Getenv("PORT")
 	api_id, _ := strconv.Atoi(os.Getenv("API_ID"))
@@ -169,6 +231,7 @@ func main() {
 		NormConst: normConst,
 		MCCRisk:   mcc,
 	}
+	ready = true
 
 	router := http.NewServeMux()
 	router.HandleFunc("/test", api.TestEndpoint)
