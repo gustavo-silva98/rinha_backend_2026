@@ -149,6 +149,8 @@ func warmupSonic() error {
 	responsePtr := responsePool.Get().(*model.Response)
 	defer responsePool.Put(responsePtr)
 	*responsePtr = model.Response{}
+	responsePtr.Approved = true
+	responsePtr.FraudScore = 0
 	for i := 1; i < 10; i++ {
 
 		err := sonic.Unmarshal([]byte(warmupJSON), payloadPtr)
