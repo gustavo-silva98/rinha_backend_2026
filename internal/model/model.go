@@ -30,6 +30,11 @@ type Payload struct {
 	} `json:"last_transaction"`
 }
 
+type Response struct {
+	Approved   bool    `json:"approved"`
+	FraudScore float32 `json:"fraud_score"`
+}
+
 type Vector14Dim struct {
 	Dim0  int8
 	Dim1  int8

@@ -1,20 +1,23 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"rinha2026/internal/model"
 	"rinha2026/internal/preprocess"
+	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // var ctx = context.Background()
 var payload model.Payload
 var vetor model.Vector14Dim
+var response model.Response
 
 type Backend struct {
 	Api_Id    int
@@ -36,20 +39,18 @@ func (api *Backend) ReadyEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		log.Fatalf("Método não permitido: %v", r.Method)
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-	err := json.NewDecoder(r.Body).Decode(&payload)
+	err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&payload)
 	if err != nil {
 		log.Fatalf("Erro ao ler payload: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 	api.Vetorize(&payload, &vetor)
-	jsonData, _ := json.Marshal(vetor)
+	response.Approved = true
+	response.FraudScore = 0
+	jsonData, _ := sonic.Marshal(response)
+
 	w.Write(jsonData)
-	fmt.Println(payload)
-	fmt.Println(vetor)
 }
 
 func limitar(val float64) float64 {
@@ -121,6 +122,11 @@ func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
 }
 
 func main() {
+	if runtime.NumCPU()*4 > 32 {
+		runtime.GOMAXPROCS(32)
+	} else {
+		runtime.GOMAXPROCS(runtime.NumCPU() * 4)
+	}
 
 	// Carregando variaveis de normalização e MCC
 	normConst, err := preprocess.LoadNormalization()
