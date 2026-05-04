@@ -7,17 +7,32 @@ import (
 	"os"
 	"rinha2026/internal/model"
 	"rinha2026/internal/preprocess"
-	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
 )
 
 // var ctx = context.Background()
-var payload model.Payload
-var vetor model.Vector14Dim
-var response model.Response
+
+var payloadPool = sync.Pool{
+	New: func() any {
+		return &model.Payload{}
+	},
+}
+
+var vetorPool = sync.Pool{
+	New: func() any {
+		return &model.Vector14Dim{}
+	},
+}
+
+var responsePool = sync.Pool{
+	New: func() any {
+		return &model.Response{}
+	},
+}
 
 type Backend struct {
 	Api_Id    int
@@ -39,16 +54,28 @@ func (api *Backend) ReadyEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
-	err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&payload)
+	payloadPtr := payloadPool.Get().(*model.Payload)
+	defer payloadPool.Put(payloadPtr)
+	*payloadPtr = model.Payload{}
+
+	vetorPtr := vetorPool.Get().(*model.Vector14Dim)
+	defer vetorPool.Put(vetorPtr)
+	*vetorPtr = model.Vector14Dim{}
+
+	responsePtr := responsePool.Get().(*model.Response)
+	defer responsePool.Put(responsePtr)
+	*responsePtr = model.Response{}
+
+	err := sonic.ConfigDefault.NewDecoder(r.Body).Decode(&payloadPtr)
 	if err != nil {
 		log.Fatalf("Erro ao ler payload: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	api.Vetorize(&payload, &vetor)
-	response.Approved = true
-	response.FraudScore = 0
-	jsonData, _ := sonic.Marshal(response)
+	api.Vetorize(payloadPtr, vetorPtr)
+	responsePtr.Approved = true
+	responsePtr.FraudScore = 0
+	jsonData, _ := sonic.Marshal(responsePtr)
 
 	w.Write(jsonData)
 }
@@ -80,7 +107,7 @@ func deParaWeekday(weekday time.Time) int {
 
 func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
 	requestedAt, _ := time.Parse(time.RFC3339, payload.Transaction.RequestedAt.String())
-	timestampLastTrans, _ := time.Parse(time.RFC3339, payload.Transaction.RequestedAt.String())
+	timestampLastTrans, _ := time.Parse(time.RFC3339, payload.LastTransaction.Timestamp.String())
 	vetor.Dim0 = int8(limitar(payload.Transaction.Amount/float64(api.NormConst.MaxAmount)) * 127)
 	vetor.Dim1 = int8(limitar(float64(payload.Transaction.Installments)/float64(api.NormConst.MaxInstallments)) * 127)
 	vetor.Dim2 = int8(limitar((payload.Transaction.Amount/payload.Customer.AvgAmount)/float64(api.NormConst.AmountVsAvgRatio)) * 127)
@@ -110,6 +137,7 @@ func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
 	for _, val := range payload.Customer.KnownMerchants {
 		if payload.Merchant.ID == val {
 			vetor.Dim11 = 0
+			break
 		}
 	}
 	val, ok := api.MCCRisk[payload.Merchant.Mcc]
@@ -122,12 +150,6 @@ func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
 }
 
 func main() {
-	if runtime.NumCPU()*4 > 32 {
-		runtime.GOMAXPROCS(32)
-	} else {
-		runtime.GOMAXPROCS(runtime.NumCPU() * 4)
-	}
-
 	// Carregando variaveis de normalização e MCC
 	normConst, err := preprocess.LoadNormalization()
 	if err != nil {
