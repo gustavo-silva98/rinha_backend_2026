@@ -14,8 +14,6 @@ import (
 )
 
 func main() {
-	os.Chdir("..")
-	os.Chdir("..")
 	workingPath, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -34,6 +32,8 @@ func main() {
 	}
 	defer gz.Close()
 
+	os.Chdir("..")
+	os.Chdir("..")
 	out, err := os.Create("vectors.bin")
 	if err != nil {
 		log.Fatal(err)

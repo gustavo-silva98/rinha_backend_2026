@@ -40,6 +40,7 @@ type Backend struct {
 	Api_Id    int
 	NormConst preprocess.NormalizationConstant
 	MCCRisk   map[string]float64
+	Refs      *preprocess.StoredRefs
 }
 
 func (api *Backend) TestEndpoint(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +78,7 @@ func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.Vetorize(payloadPtr, vetorPtr)
-	responsePtr.Approved = true
+	responsePtr.Approved = api.Refs.ConvertLabel(1)
 	responsePtr.FraudScore = 0
 	jsonData, _ := sonic.Marshal(responsePtr)
 
@@ -225,6 +226,10 @@ func main() {
 		log.Fatalf("erro ao WarmUp Sonic Json: %v", err)
 		return
 	}
+	refs, err := preprocess.LoadRefs("vectors.bin")
+	if err != nil {
+		log.Fatalf("erro ao carregar as refs: %v", err)
+	}
 
 	port := os.Getenv("PORT")
 	api_id, _ := strconv.Atoi(os.Getenv("API_ID"))
@@ -232,6 +237,7 @@ func main() {
 		Api_Id:    api_id,
 		NormConst: normConst,
 		MCCRisk:   mcc,
+		Refs:      refs,
 	}
 	ready = true
 

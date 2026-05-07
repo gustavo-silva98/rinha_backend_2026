@@ -1,18 +1,29 @@
 package preprocess
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"syscall"
+	"unsafe"
 )
 
-var (
-	Magic   = "RVEC"
-	Dims    = 14
-	Stride  = 16
-	Version = uint8(1)
+const (
+	Magic      = "RVEC"
+	Dims       = 14
+	Stride     = 16
+	Version    = uint8(1)
+	HeaderSize = 16
 )
+
+type StoredRefs struct {
+	Raw   []byte
+	Count uint32
+}
 
 type NormalizationConstant struct {
 	MaxAmount            int `json:"max_amount"`
@@ -73,4 +84,62 @@ func Quantize(v float64) int8 {
 		q = 0
 	}
 	return int8(q)
+}
+
+func LoadRefs(path string) (*StoredRefs, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+	data, err := syscall.Mmap(
+		int(f.Fd()), 0, int(fi.Size()),
+		syscall.PROT_READ, syscall.MAP_SHARED,
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	if string(data[:4]) != "RVEC" {
+		return nil, fmt.Errorf("Magic inválido")
+	}
+	count := binary.LittleEndian.Uint32(data[8:12])
+
+	syscall.Madvise(data, syscall.MADV_SEQUENTIAL)
+	syscall.Madvise(data, syscall.MADV_WILLNEED)
+
+	return &StoredRefs{Raw: data, Count: count}, nil
+
+}
+
+func (s *StoredRefs) Vec(i uint32) []int8 {
+	off := HeaderSize + int(i)*Stride
+	return unsafe.Slice((*int8)(unsafe.Pointer(&s.Raw[off])), Dims)
+}
+
+func (s *StoredRefs) Label(i uint32) uint8 {
+	return s.Raw[HeaderSize+int(i)*Stride+Dims]
+}
+
+func (s *StoredRefs) ConvertLabel(i uint32) bool {
+	label := s.Label(i)
+	if label == 1 {
+		return true
+	} else {
+		return false
+	}
+}
+
+func Bruteforce(a, b []int8) int32 {
+	var acc int32
+	for i := 0; i < Dims; i++ {
+		d := int32(a[i]) - int32(b[i])
+		acc += d * d
+	}
+	return acc
 }

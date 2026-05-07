@@ -58,8 +58,3 @@ type RawVector struct {
 	Vector []float64 `json:"vector"`
 	Label  string    `json:"label"`
 }
-
-type StoredRefs struct {
-	Raw   []byte
-	Count uint32
-}
