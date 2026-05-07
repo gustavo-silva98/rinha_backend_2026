@@ -1,6 +1,8 @@
 package model
 
-import "time"
+import (
+	"time"
+)
 
 type Payload struct {
 	ID          string `json:"id"`
@@ -50,4 +52,14 @@ type Vector14Dim struct {
 	Dim11 int8
 	Dim12 int8
 	Dim13 int8
+}
+
+type RawVector struct {
+	Vector []float64 `json:"vector"`
+	Label  string    `json:"label"`
+}
+
+type StoredRefs struct {
+	Raw   []byte
+	Count uint32
 }

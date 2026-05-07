@@ -2,8 +2,16 @@ package preprocess
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
+)
+
+var (
+	Magic   = "RVEC"
+	Dims    = 14
+	Stride  = 16
+	Version = uint8(1)
 )
 
 type NormalizationConstant struct {
@@ -52,4 +60,17 @@ func LoadMCC() (map[string]float64, error) {
 	}
 	return mcc, nil
 
+}
+func Quantize(v float64) int8 {
+	if v == -1.0 {
+		return -128
+	}
+	q := math.Round(v * 127.0)
+	if q > 127 {
+		q = 127
+	}
+	if q < 0 {
+		q = 0
+	}
+	return int8(q)
 }
