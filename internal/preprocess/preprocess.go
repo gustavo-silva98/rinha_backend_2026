@@ -16,7 +16,7 @@ const (
 	Magic      = "RVEC"
 	Dims       = 14
 	Stride     = 16
-	Version    = uint8(1)
+	Version    = uint32(1)
 	HeaderSize = 16
 )
 

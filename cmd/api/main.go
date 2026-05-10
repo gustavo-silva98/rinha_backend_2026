@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
+	"rinha2026/internal/helpers"
 	"rinha2026/internal/model"
 	"rinha2026/internal/preprocess"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -35,6 +38,8 @@ var responsePool = sync.Pool{
 		return &model.Response{}
 	},
 }
+var listResult = make([]int32, 5)
+var idxResult = make([]int32, 5)
 
 type Backend struct {
 	Api_Id    int
@@ -58,6 +63,41 @@ func (api *Backend) ReadyEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (api *Backend) GetVector(w http.ResponseWriter, r *http.Request) {
+	urlParse, _ := url.Parse(r.URL.String())
+	vecIdx := urlParse.Query().Get("vec")
+	vecIdxInt, _ := strconv.Atoi(vecIdx)
+	log.Println(vecIdxInt)
+
+	vec := api.Refs.Vec(uint32(vecIdxInt))
+	label := api.Refs.Label(uint32(vecIdxInt))
+	log.Println(vec)
+
+	// dequantiza pra float32 pra comparar com o JSON original
+	dequant := make([]float64, len(vec))
+	for i, v := range vec {
+		if v == -128 {
+			dequant[i] = -1.0 // sentinel
+		} else {
+			dequant[i] = float64(v) / 127.0
+		}
+	}
+
+	labelStr := "legit"
+	if label == 1 {
+		labelStr = "fraud"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"idx":      vecIdx,
+		"label":    labelStr,
+		"raw_int8": vec,     // o que está no mmap
+		"dequant":  dequant, // convertido de volta pra float
+	})
+
+}
+
 func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
 	payloadPtr := payloadPool.Get().(*model.Payload)
 	defer payloadPool.Put(payloadPtr)
@@ -78,8 +118,47 @@ func (api *Backend) FraudScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.Vetorize(payloadPtr, vetorPtr)
-	responsePtr.Approved = api.Refs.ConvertLabel(1)
-	responsePtr.FraudScore = 0
+	// convert struct vector to slice for distance computation
+	vec := []int8{
+		vetorPtr.Dim0,
+		vetorPtr.Dim1,
+		vetorPtr.Dim2,
+		vetorPtr.Dim3,
+		vetorPtr.Dim4,
+		vetorPtr.Dim5,
+		vetorPtr.Dim6,
+		vetorPtr.Dim7,
+		vetorPtr.Dim8,
+		vetorPtr.Dim9,
+		vetorPtr.Dim10,
+		vetorPtr.Dim11,
+		vetorPtr.Dim12,
+		vetorPtr.Dim13,
+	}
+	for i := uint32(0); i < api.Refs.Count; i++ {
+		dist := helpers.DistEuclid(vec, api.Refs.Vec(i))
+		for idx := 0; idx < 5; idx++ {
+			if listResult[idx] > dist {
+				listResult[idx] = dist
+				idxResult[idx] = int32(i)
+				break
+			}
+		}
+	}
+	sum := int32(0)
+	for _, i := range idxResult {
+		label := api.Refs.ConvertLabel(uint32(i))
+		if label {
+			sum += 1
+		}
+	}
+	div := float32(sum / 5)
+	responsePtr.FraudScore = div
+	if div > 0.6 {
+		responsePtr.Approved = true
+	} else {
+		responsePtr.Approved = false
+	}
 	jsonData, _ := sonic.Marshal(responsePtr)
 
 	w.Write(jsonData)
@@ -210,7 +289,6 @@ func (api *Backend) Vetorize(payload *model.Payload, vetor *model.Vector14Dim) {
 
 func main() {
 	// Carregando variaveis de normalização e MCC
-	runtime.GOMAXPROCS(1)
 	normConst, err := preprocess.LoadNormalization()
 	if err != nil {
 		log.Fatalf("erro ao carregar Constantes de Normalização: %v", err)
@@ -245,10 +323,14 @@ func main() {
 	router.HandleFunc("/test", api.TestEndpoint)
 	router.HandleFunc("/ready", api.ReadyEndpoint)
 	router.HandleFunc("/fraud-score", api.FraudScore)
+	router.HandleFunc("/vector", api.GetVector)
 
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: router,
+	}
+	for i := 0; i < 5; i++ {
+		listResult[i] = math.MaxInt32
 	}
 	log.Fatal(server.ListenAndServe())
 }

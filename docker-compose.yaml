@@ -44,6 +44,7 @@ services:
       - backend
     depends_on:
       - api2
+      - api1
     deploy:
       resources:
         limits:

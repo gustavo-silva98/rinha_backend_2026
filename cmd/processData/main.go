@@ -72,6 +72,7 @@ func main() {
 		buf[preprocess.Dims+1] = 0 //Padding de cache line
 
 		bw.Write(buf)
+		idx++
 	}
 	if err := bw.Flush(); err != nil {
 		log.Fatal(err)
